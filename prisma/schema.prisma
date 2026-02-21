@@ -1,0 +1,51 @@
+// WhatsApp bot schema for service-based businesses
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Customer {
+  id            String         @id @default(cuid())
+  phone         String         @unique
+  name          String?
+  createdAt     DateTime       @default(now())
+  conversations Conversation[]
+  jobs          Job[]
+}
+
+model Conversation {
+  id         String   @id @default(cuid())
+  customerId String
+  // State machine: MENU | SERVICE_SELECT | INTAKE | CONFIRM | SLOT_SELECT | AI_CHAT | HANDOFF | DONE
+  state      String   @default("MENU")
+  // Collects structured intake data (service type, problem, address, urgency) - JSON string
+  intakeData String   @default("{}")
+  // Claude message history [{ role, content }] - JSON string
+  aiHistory  String   @default("[]")
+  handedOff  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  customer   Customer @relation(fields: [customerId], references: [id])
+}
+
+model Job {
+  id          String   @id @default(cuid())
+  customerId  String
+  serviceType String
+  description String
+  address     String
+  urgent      Boolean  @default(false)
+  status      String   @default("PENDING") // PENDING | CONFIRMED | DONE
+  quoteMin        Float?
+  quoteMax        Float?
+  scheduledAt     DateTime? // Confirmed appointment start time
+  calendarEventId String?   // Google Calendar event ID
+  calendarLink    String?   // Link to view the event in Google Calendar
+  createdAt       DateTime  @default(now())
+  customer        Customer  @relation(fields: [customerId], references: [id])
+}

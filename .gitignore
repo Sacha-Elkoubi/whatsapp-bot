@@ -1,0 +1,12 @@
+node_modules/
+.env
+
+# Database files
+*.db
+*.db-journal
+
+# Build output
+dist/
+
+# Prisma generated client
+/src/generated/

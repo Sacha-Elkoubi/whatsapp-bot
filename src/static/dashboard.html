@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Service Bot — Owner Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #075e54;
+      color: #fff;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    header h1 { font-size: 1.2rem; font-weight: 600; }
+    header .subtitle { font-size: 0.8rem; opacity: 0.75; margin-top: 2px; }
+    #last-updated { font-size: 0.75rem; opacity: 0.7; }
+
+    main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+
+    /* ── Stats Cards ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .stat-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      text-align: center;
+    }
+    .stat-card .value { font-size: 2.4rem; font-weight: 700; line-height: 1; }
+    .stat-card .label { font-size: 0.78rem; color: #666; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-card.pending   .value { color: #e67e22; }
+    .stat-card.confirmed .value { color: #27ae60; }
+    .stat-card.handoff   .value { color: #e74c3c; }
+    .stat-card.chats     .value { color: #2980b9; }
+    .stat-card.total     .value { color: #6c5ce7; }
+    .stat-card.done      .value { color: #95a5a6; }
+
+    /* ── Section ── */
+    section { margin-bottom: 32px; }
+    section h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #444;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    section h2 .count {
+      background: #075e54;
+      color: #fff;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    /* ── Table ── */
+    .table-wrap { overflow-x: auto; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th {
+      background: #f8f9fa;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #888;
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+      white-space: nowrap;
+    }
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 0.88rem;
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafafa; }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-pending   { background: #fff3e0; color: #e67e22; }
+    .badge-confirmed { background: #e8f5e9; color: #27ae60; }
+    .badge-done      { background: #eceff1; color: #607d8b; }
+    .badge-urgent    { background: #fdecea; color: #e74c3c; }
+    .badge-menu      { background: #e3f2fd; color: #1565c0; }
+    .badge-ai        { background: #f3e5f5; color: #7b1fa2; }
+    .badge-handoff   { background: #fdecea; color: #c62828; }
+    .badge-intake    { background: #e8f5e9; color: #2e7d32; }
+
+    /* ── Status Select ── */
+    select.status-select {
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      background: #fff;
+    }
+    select.status-select:focus { outline: 2px solid #075e54; }
+
+    /* ── Conversations list ── */
+    .conv-list { display: flex; flex-direction: column; gap: 10px; }
+    .conv-item {
+      background: #fff;
+      border-radius: 10px;
+      padding: 14px 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .conv-item .phone { font-weight: 600; font-size: 0.9rem; flex: 1; }
+    .conv-item .time  { font-size: 0.75rem; color: #999; }
+
+    /* ── Button ── */
+    .btn {
+      background: #075e54;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .btn:hover { background: #054d44; }
+
+    /* ── Empty state ── */
+    .empty { text-align: center; padding: 32px; color: #aaa; font-size: 0.9rem; }
+
+    /* ── Refresh indicator ── */
+    #refresh-bar {
+      height: 3px;
+      background: #25d366;
+      width: 0%;
+      transition: width 30s linear;
+      position: fixed;
+      top: 0;
+      left: 0;
+    }
+  </style>
+</head>
+<body>
+
+<div id="refresh-bar"></div>
+
+<header>
+  <div>
+    <h1>📋 Owner Dashboard</h1>
+    <div class="subtitle">WhatsApp Service Bot</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span id="last-updated">Loading…</span>
+    <button class="btn" onclick="loadAll()">↻ Refresh</button>
+    <button class="btn" style="background:#25d366" onclick="sendDigest()">📤 Send Digest Now</button>
+  </div>
+</header>
+
+<main>
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-card total">
+      <div class="value" id="stat-total">—</div>
+      <div class="label">Total Jobs</div>
+    </div>
+    <div class="stat-card pending">
+      <div class="value" id="stat-pending">—</div>
+      <div class="label">Pending</div>
+    </div>
+    <div class="stat-card confirmed">
+      <div class="value" id="stat-confirmed">—</div>
+      <div class="label">Confirmed</div>
+    </div>
+    <div class="stat-card done">
+      <div class="value" id="stat-done">—</div>
+      <div class="label">Done</div>
+    </div>
+    <div class="stat-card chats">
+      <div class="value" id="stat-chats">—</div>
+      <div class="label">Active Chats</div>
+    </div>
+    <div class="stat-card handoff">
+      <div class="value" id="stat-handoff">—</div>
+      <div class="label">Awaiting Reply</div>
+    </div>
+  </div>
+
+  <!-- Jobs -->
+  <section>
+    <h2>🔧 Jobs <span class="count" id="jobs-count">0</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Customer</th>
+            <th>Problem</th>
+            <th>Address</th>
+            <th>Quote</th>
+            <th>Urgent</th>
+            <th>Scheduled</th>
+            <th>Status</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody id="jobs-tbody">
+          <tr><td colspan="9" class="empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Active Conversations -->
+  <section>
+    <h2>💬 Active Conversations <span class="count" id="convs-count">0</span></h2>
+    <div class="conv-list" id="convs-list">
+      <div class="empty">Loading…</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const STATE_BADGE = {
+  MENU:           'badge-menu',
+  SERVICE_SELECT: 'badge-menu',
+  INTAKE:         'badge-intake',
+  CONFIRM:        'badge-intake',
+  AI_CHAT:        'badge-ai',
+  HANDOFF:        'badge-handoff',
+  DONE:           'badge-done',
+};
+
+function fmt(state) {
+  const labels = {
+    MENU: 'Menu', SERVICE_SELECT: 'Selecting Service',
+    INTAKE: 'Intake', CONFIRM: 'Confirming', AI_CHAT: 'AI Chat',
+    HANDOFF: '⚠️ Handoff', DONE: 'Done',
+  };
+  return labels[state] || state;
+}
+
+function timeAgo(dateStr) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function statusBadge(status) {
+  const cls = { PENDING: 'badge-pending', CONFIRMED: 'badge-confirmed', DONE: 'badge-done' }[status] || '';
+  return `<span class="badge ${cls}">${status}</span>`;
+}
+
+async function loadStats() {
+  const data = await fetch('/api/stats').then(r => r.json());
+  document.getElementById('stat-total').textContent     = data.totalJobs;
+  document.getElementById('stat-pending').textContent   = data.pendingJobs;
+  document.getElementById('stat-confirmed').textContent = data.confirmedJobs;
+  document.getElementById('stat-done').textContent      = data.doneJobs;
+  document.getElementById('stat-chats').textContent     = data.activeConversations;
+  document.getElementById('stat-handoff').textContent   = data.openHandoffs;
+}
+
+async function loadJobs() {
+  const jobs = await fetch('/api/jobs').then(r => r.json());
+  const tbody = document.getElementById('jobs-tbody');
+  document.getElementById('jobs-count').textContent = jobs.length;
+
+  if (!jobs.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">No jobs yet</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = jobs.map(j => `
+    <tr>
+      <td>${j.serviceType}</td>
+      <td>
+        <div style="font-weight:600">${j.customer?.name || '—'}</div>
+        <div style="font-size:0.75rem;color:#888">${j.customer?.phone || ''}</div>
+      </td>
+      <td style="max-width:200px;white-space:normal">${j.description}</td>
+      <td style="max-width:180px;white-space:normal">${j.address}</td>
+      <td>${j.quoteMin != null ? `£${j.quoteMin}–£${j.quoteMax}` : '—'}</td>
+      <td>${j.urgent ? '<span class="badge badge-urgent">🚨 Yes</span>' : '—'}</td>
+      <td style="white-space:nowrap;font-size:0.82rem">
+        ${j.scheduledAt
+          ? `<div>${new Date(j.scheduledAt).toLocaleDateString('en-GB', {weekday:'short',day:'numeric',month:'short'})}</div>
+             <div style="color:#888">${new Date(j.scheduledAt).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hour12:true})}</div>
+             ${j.calendarLink ? `<a href="${j.calendarLink}" target="_blank" style="font-size:0.72rem;color:#075e54">📅 View</a>` : ''}`
+          : '—'}
+      </td>
+      <td>
+        <select class="status-select" data-id="${j.id}" onchange="updateStatus('${j.id}', this.value)">
+          <option value="PENDING"   ${j.status==='PENDING'   ? 'selected' : ''}>Pending</option>
+          <option value="CONFIRMED" ${j.status==='CONFIRMED' ? 'selected' : ''}>Confirmed</option>
+          <option value="DONE"      ${j.status==='DONE'      ? 'selected' : ''}>Done</option>
+        </select>
+      </td>
+      <td style="white-space:nowrap;font-size:0.78rem;color:#888">${timeAgo(j.createdAt)}</td>
+    </tr>
+  `).join('');
+}
+
+async function loadConversations() {
+  const convs = await fetch('/api/conversations').then(r => r.json());
+  const active = convs.filter(c => c.state !== 'DONE');
+  document.getElementById('convs-count').textContent = active.length;
+  const list = document.getElementById('convs-list');
+
+  if (!active.length) {
+    list.innerHTML = '<div class="empty">No active conversations</div>';
+    return;
+  }
+
+  list.innerHTML = active.map(c => `
+    <div class="conv-item">
+      <div class="phone">${c.customer?.phone || 'Unknown'}</div>
+      <span class="badge ${STATE_BADGE[c.state] || ''}">${fmt(c.state)}</span>
+      <div class="time">${timeAgo(c.updatedAt)}</div>
+    </div>
+  `).join('');
+}
+
+async function updateStatus(id, status) {
+  await fetch(`/api/jobs/${id}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  await loadStats();
+}
+
+async function sendDigest() {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    await fetch('/api/test-digest');
+    btn.textContent = '✅ Sent!';
+    setTimeout(() => { btn.disabled = false; btn.textContent = '📤 Send Digest Now'; }, 3000);
+  } catch {
+    btn.textContent = '❌ Error';
+    btn.disabled = false;
+  }
+}
+
+async function loadAll() {
+  await Promise.all([loadStats(), loadJobs(), loadConversations()]);
+  document.getElementById('last-updated').textContent =
+    'Updated ' + new Date().toLocaleTimeString();
+  startProgressBar();
+}
+
+function startProgressBar() {
+  const bar = document.getElementById('refresh-bar');
+  bar.style.transition = 'none';
+  bar.style.width = '0%';
+  requestAnimationFrame(() => {
+    bar.style.transition = 'width 30s linear';
+    bar.style.width = '100%';
+  });
+}
+
+// Initial load + auto-refresh every 30s
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>
