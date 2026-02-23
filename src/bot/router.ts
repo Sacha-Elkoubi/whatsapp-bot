@@ -7,17 +7,19 @@ import {
   sendJobConfirmation,
   sendSlotPicker,
   sendFAQMenu,
-  SERVICES,
+  getServices,
 } from './menus.js';
 import { getAvailableSlots, createCalendarEvent } from '../services/calendar.js';
 import { handleAiChat, generateQuote } from './ai.js';
 import { initiateHandoff } from './handoff.js';
 import { matchFAQ, FAQS } from '../services/faq.js';
+import { getTenantById, type TenantConfig } from '../services/tenant.js';
 
 interface IncomingMessage {
   phone: string;
   text: string;
   messageId: string;
+  tenantId: string;
 }
 
 interface IntakeData {
@@ -28,23 +30,29 @@ interface IntakeData {
   urgent?: boolean;
   intakeStep?: number;
   jobId?: string;
-  // ISO strings of available slots offered to the customer
   availableSlots?: string[];
 }
 
 export async function routeMessage(msg: IncomingMessage): Promise<void> {
-  const { phone, text } = msg;
+  const { phone, text, tenantId } = msg;
 
-  // Get or create customer
+  const tenant = await getTenantById(tenantId);
+  if (!tenant) {
+    console.error(`[router] Tenant not found: ${tenantId}`);
+    return;
+  }
+
+  // Get or create customer (scoped to tenant)
   const customer = await prisma.customer.upsert({
-    where: { phone },
-    create: { phone },
+    where: { tenantId_phone: { tenantId, phone } },
+    create: { tenantId, phone },
     update: {},
   });
 
   // Get latest active conversation (not DONE or HANDOFF)
   let conversation = await prisma.conversation.findFirst({
     where: {
+      tenantId,
       customerId: customer.id,
       state: { notIn: ['DONE'] },
     },
@@ -66,9 +74,9 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
       });
     }
     conversation = await prisma.conversation.create({
-      data: { customerId: customer.id, state: 'MENU' },
+      data: { tenantId, customerId: customer.id, state: 'MENU' },
     });
-    await sendWelcomeMenu(phone);
+    await sendWelcomeMenu(tenant, phone);
     return;
   }
 
@@ -82,12 +90,12 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
         where: { id: conversation.id },
         data: { state: 'SERVICE_SELECT' },
       });
-      await sendServiceMenu(phone);
+      await sendServiceMenu(tenant, phone);
       return;
     }
 
     if (text === 'menu_faq') {
-      await sendFAQMenu(phone);
+      await sendFAQMenu(tenant, phone);
       return;
     }
 
@@ -106,28 +114,29 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
         ? FAQS.find((f) => f.keywords.some((k) => keywords.includes(k)))
         : null;
       if (faq) {
-        await sendText(phone, faq.answer + '\n\n_Type anything to continue or say "menu" to go back._');
+        await sendText(tenant, phone, faq.answer + '\n\n_Type anything to continue or say "menu" to go back._');
       } else {
-        await sendWelcomeMenu(phone);
+        await sendWelcomeMenu(tenant, phone);
       }
       return;
     }
 
     if (text === 'menu_human') {
-      await initiateHandoff(conversation.id, phone, 'Customer requested human agent');
+      await initiateHandoff(tenant, conversation.id, phone, 'Customer requested human agent');
       return;
     }
 
     // Unrecognised input — show menu again
-    await sendWelcomeMenu(phone);
+    await sendWelcomeMenu(tenant, phone);
     return;
   }
 
   // ─── SERVICE SELECTION ─────────────────────────────────────────────────────
   if (state === 'SERVICE_SELECT') {
-    const service = SERVICES.find((s) => s.id === text);
+    const services = getServices(tenant);
+    const service = services.find((s) => s.id === text);
     if (!service) {
-      await sendServiceMenu(phone);
+      await sendServiceMenu(tenant, phone);
       return;
     }
 
@@ -136,7 +145,7 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
       where: { id: conversation.id },
       data: { state: 'INTAKE', intakeData: JSON.stringify(updatedIntake) },
     });
-    await sendIntakeQuestion(phone, 0, service.title);
+    await sendIntakeQuestion(tenant, phone, 0, service.title);
     return;
   }
 
@@ -145,43 +154,39 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
     const step = intake.intakeStep ?? 0;
 
     if (step === 0) {
-      // Description
       const updatedIntake: IntakeData = { ...intake, description: text, intakeStep: 1 };
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: { intakeData: JSON.stringify(updatedIntake) },
       });
-      await sendIntakeQuestion(phone, 1, intake.serviceType ?? '');
+      await sendIntakeQuestion(tenant, phone, 1, intake.serviceType ?? '');
       return;
     }
 
     if (step === 1) {
-      // Address
       const updatedIntake: IntakeData = { ...intake, address: text, intakeStep: 2 };
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: { intakeData: JSON.stringify(updatedIntake) },
       });
-      await sendIntakeQuestion(phone, 2, intake.serviceType ?? '');
+      await sendIntakeQuestion(tenant, phone, 2, intake.serviceType ?? '');
       return;
     }
 
     if (step === 2) {
-      // Urgency button
       const urgent = text === 'intake_urgent_yes';
       const finalIntake: IntakeData = { ...intake, urgent, intakeStep: 3 };
 
-      // Generate AI quote
-      await sendText(phone, '⏳ Generating your quote...');
+      await sendText(tenant, phone, '⏳ Generating your quote...');
       const quote = await generateQuote(
         intake.serviceType ?? '',
         intake.description ?? '',
         urgent
       );
 
-      // Save the job
       const job = await prisma.job.create({
         data: {
+          tenantId,
           customerId: customer.id,
           serviceType: intake.serviceType ?? '',
           description: intake.description ?? '',
@@ -200,7 +205,7 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
         },
       });
 
-      await sendJobConfirmation(phone, {
+      await sendJobConfirmation(tenant, phone, {
         service: intake.serviceType ?? '',
         description: intake.description ?? '',
         address: intake.address ?? '',
@@ -222,29 +227,27 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
         });
       }
 
-      // Fetch available calendar slots
-      await sendText(phone, '📅 Checking available appointment slots...');
+      await sendText(tenant, phone, '📅 Checking available appointment slots...');
       let slots: Date[] = [];
       try {
-        slots = await getAvailableSlots(intake.serviceType ?? '');
+        slots = await getAvailableSlots(tenant, intake.serviceType ?? '', intake.urgent ?? false);
       } catch (err) {
         console.error('[calendar] Failed to fetch slots:', err);
       }
 
       if (slots.length === 0) {
-        // No slots available — fall back to manual scheduling
         await prisma.conversation.update({
           where: { id: conversation.id },
           data: { state: 'AI_CHAT' },
         });
         await sendText(
+          tenant,
           phone,
           `✅ *Booking confirmed!*\n\nWe couldn't find an automatic slot right now. Our team will contact you shortly to arrange a convenient time. 📞\n\nIs there anything else I can help with?`
         );
         return;
       }
 
-      // Store available slots as ISO strings in intakeData
       const updatedIntake: IntakeData = {
         ...intake,
         availableSlots: slots.map((s) => s.toISOString()),
@@ -253,7 +256,7 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
         where: { id: conversation.id },
         data: { state: 'SLOT_SELECT', intakeData: JSON.stringify(updatedIntake) },
       });
-      await sendSlotPicker(phone, slots);
+      await sendSlotPicker(tenant, phone, slots);
       return;
     }
 
@@ -262,7 +265,7 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
         where: { id: conversation.id },
         data: { state: 'DONE' },
       });
-      await sendText(phone, `No problem! Feel free to message us anytime you need help. 😊`);
+      await sendText(tenant, phone, `No problem! Feel free to message us anytime you need help. 😊`);
       return;
     }
   }
@@ -271,9 +274,8 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
   if (state === 'SLOT_SELECT') {
     const slotMatch = text.match(/^slot_(\d+)$/);
     if (!slotMatch || !intake.availableSlots) {
-      // Unrecognised — re-show the slot picker
       const slots = (intake.availableSlots ?? []).map((s) => new Date(s));
-      await sendSlotPicker(phone, slots);
+      await sendSlotPicker(tenant, phone, slots);
       return;
     }
 
@@ -281,22 +283,22 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
     const slotIso = intake.availableSlots[slotIndex];
     if (!slotIso) {
       const slots = intake.availableSlots.map((s) => new Date(s));
-      await sendSlotPicker(phone, slots);
+      await sendSlotPicker(tenant, phone, slots);
       return;
     }
 
     const chosenSlot = new Date(slotIso);
 
-    // Create Google Calendar event
     let eventId = '';
     let calendarLink = '';
     try {
-      const event = await createCalendarEvent({
+      const event = await createCalendarEvent(tenant, {
         serviceType: intake.serviceType ?? '',
         description: intake.description ?? '',
         address: intake.address ?? '',
         customerPhone: phone,
         startTime: chosenSlot,
+        urgent: intake.urgent ?? false,
       });
       eventId = event.eventId;
       calendarLink = event.calendarLink;
@@ -304,7 +306,6 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
       console.error('[calendar] Failed to create event:', err);
     }
 
-    // Save scheduledAt + calendarEventId to Job
     if (intake.jobId) {
       await prisma.job.update({
         where: { id: intake.jobId },
@@ -331,34 +332,33 @@ export async function routeMessage(msg: IncomingMessage): Promise<void> {
     });
 
     await sendText(
+      tenant,
       phone,
       `✅ *Appointment booked!*\n\n📅 ${slotLabel}\n📍 ${intake.address ?? ''}\n\nYour engineer will arrive at the scheduled time. You'll receive a reminder closer to the date.\n\nIs there anything else I can help with?`
     );
     return;
   }
 
-  // ─── AI CHAT STATE (free-form after booking, or for general questions) ─────
+  // ─── AI CHAT STATE ─────────────────────────────────────────────────────────
   if (state === 'AI_CHAT') {
-    // Check FAQ first — instant, free, no Claude call needed
     const faqAnswer = matchFAQ(text);
     if (faqAnswer) {
-      await sendText(phone, faqAnswer);
+      await sendText(tenant, phone, faqAnswer);
       return;
     }
 
-    const reply = await handleAiChat(conversation.id, text, phone);
+    const reply = await handleAiChat(tenant, conversation.id, text);
 
-    // If Claude suggests handoff, do it
     if (reply.toLowerCase().includes("i'll connect you with our team")) {
-      await sendText(phone, reply);
-      await initiateHandoff(conversation.id, phone, 'Claude suggested escalation');
+      await sendText(tenant, phone, reply);
+      await initiateHandoff(tenant, conversation.id, phone, 'Claude suggested escalation');
       return;
     }
 
-    await sendText(phone, reply);
+    await sendText(tenant, phone, reply);
     return;
   }
 
   // ─── FALLBACK ──────────────────────────────────────────────────────────────
-  await sendWelcomeMenu(phone);
+  await sendWelcomeMenu(tenant, phone);
 }

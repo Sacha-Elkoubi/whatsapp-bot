@@ -29,6 +29,35 @@
 
     main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
 
+    /* ── Login ── */
+    #login-screen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 80vh;
+    }
+    .login-card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 40px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    .login-card h2 { margin-bottom: 8px; color: #075e54; }
+    .login-card p { color: #666; font-size: 0.9rem; margin-bottom: 24px; }
+    .login-card input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+    }
+    .login-card input:focus { outline: 2px solid #075e54; border-color: transparent; }
+    #login-error { color: #e74c3c; font-size: 0.85rem; margin-bottom: 12px; display: none; }
+
     /* ── Stats Cards ── */
     .stats-grid {
       display: grid;
@@ -163,88 +192,183 @@
       top: 0;
       left: 0;
     }
+
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
 
 <div id="refresh-bar"></div>
 
-<header>
-  <div>
-    <h1>📋 Owner Dashboard</h1>
-    <div class="subtitle">WhatsApp Service Bot</div>
+<!-- Login Screen -->
+<div id="login-screen">
+  <div class="login-card">
+    <h2>Service Bot</h2>
+    <p>Sign in to your dashboard</p>
+    <div id="login-error"></div>
+    <input type="email" id="login-email" placeholder="Email" autocomplete="email" />
+    <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" />
+    <button class="btn" style="width:100%;padding:12px;font-size:1rem;margin-top:8px" onclick="doLogin()">Sign In</button>
   </div>
-  <div style="display:flex;align-items:center;gap:12px;">
-    <span id="last-updated">Loading…</span>
-    <button class="btn" onclick="loadAll()">↻ Refresh</button>
-    <button class="btn" style="background:#25d366" onclick="sendDigest()">📤 Send Digest Now</button>
-  </div>
-</header>
+</div>
 
-<main>
-  <!-- Stats -->
-  <div class="stats-grid">
-    <div class="stat-card total">
-      <div class="value" id="stat-total">—</div>
-      <div class="label">Total Jobs</div>
+<!-- Dashboard (hidden until logged in) -->
+<div id="dashboard" class="hidden">
+  <header>
+    <div>
+      <h1>📋 Owner Dashboard</h1>
+      <div class="subtitle" id="tenant-name">WhatsApp Service Bot</div>
     </div>
-    <div class="stat-card pending">
-      <div class="value" id="stat-pending">—</div>
-      <div class="label">Pending</div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span id="last-updated">Loading…</span>
+      <button class="btn" onclick="loadAll()">↻ Refresh</button>
+      <button class="btn" style="background:#25d366" onclick="sendDigest()">📤 Send Digest Now</button>
+      <button class="btn" style="background:#e74c3c" onclick="doLogout()">Logout</button>
     </div>
-    <div class="stat-card confirmed">
-      <div class="value" id="stat-confirmed">—</div>
-      <div class="label">Confirmed</div>
-    </div>
-    <div class="stat-card done">
-      <div class="value" id="stat-done">—</div>
-      <div class="label">Done</div>
-    </div>
-    <div class="stat-card chats">
-      <div class="value" id="stat-chats">—</div>
-      <div class="label">Active Chats</div>
-    </div>
-    <div class="stat-card handoff">
-      <div class="value" id="stat-handoff">—</div>
-      <div class="label">Awaiting Reply</div>
-    </div>
-  </div>
+  </header>
 
-  <!-- Jobs -->
-  <section>
-    <h2>🔧 Jobs <span class="count" id="jobs-count">0</span></h2>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Service</th>
-            <th>Customer</th>
-            <th>Problem</th>
-            <th>Address</th>
-            <th>Quote</th>
-            <th>Urgent</th>
-            <th>Scheduled</th>
-            <th>Status</th>
-            <th>Date</th>
-          </tr>
-        </thead>
-        <tbody id="jobs-tbody">
-          <tr><td colspan="9" class="empty">Loading…</td></tr>
-        </tbody>
-      </table>
+  <main>
+    <div class="stats-grid">
+      <div class="stat-card total">
+        <div class="value" id="stat-total">—</div>
+        <div class="label">Total Jobs</div>
+      </div>
+      <div class="stat-card pending">
+        <div class="value" id="stat-pending">—</div>
+        <div class="label">Pending</div>
+      </div>
+      <div class="stat-card confirmed">
+        <div class="value" id="stat-confirmed">—</div>
+        <div class="label">Confirmed</div>
+      </div>
+      <div class="stat-card done">
+        <div class="value" id="stat-done">—</div>
+        <div class="label">Done</div>
+      </div>
+      <div class="stat-card chats">
+        <div class="value" id="stat-chats">—</div>
+        <div class="label">Active Chats</div>
+      </div>
+      <div class="stat-card handoff">
+        <div class="value" id="stat-handoff">—</div>
+        <div class="label">Awaiting Reply</div>
+      </div>
     </div>
-  </section>
 
-  <!-- Active Conversations -->
-  <section>
-    <h2>💬 Active Conversations <span class="count" id="convs-count">0</span></h2>
-    <div class="conv-list" id="convs-list">
-      <div class="empty">Loading…</div>
-    </div>
-  </section>
-</main>
+    <section>
+      <h2>🔧 Jobs <span class="count" id="jobs-count">0</span></h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th>Customer</th>
+              <th>Problem</th>
+              <th>Address</th>
+              <th>Quote</th>
+              <th>Urgent</th>
+              <th>Scheduled</th>
+              <th>Status</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-tbody">
+            <tr><td colspan="9" class="empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>💬 Active Conversations <span class="count" id="convs-count">0</span></h2>
+      <div class="conv-list" id="convs-list">
+        <div class="empty">Loading…</div>
+      </div>
+    </section>
+  </main>
+</div>
 
 <script>
+// ── Auth ──
+let authToken = localStorage.getItem('jwt');
+let tenantInfo = null;
+
+function authHeaders() {
+  return authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+}
+
+async function authFetch(url, opts = {}) {
+  const headers = { ...authHeaders(), ...(opts.headers || {}) };
+  const res = await fetch(url, { ...opts, headers });
+  if (res.status === 401) {
+    doLogout();
+    throw new Error('Unauthorized');
+  }
+  return res;
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Login failed';
+      errEl.style.display = 'block';
+      return;
+    }
+    authToken = data.token;
+    tenantInfo = data.tenant;
+    localStorage.setItem('jwt', authToken);
+    showDashboard();
+  } catch {
+    errEl.textContent = 'Connection error';
+    errEl.style.display = 'block';
+  }
+}
+
+function doLogout() {
+  authToken = null;
+  tenantInfo = null;
+  localStorage.removeItem('jwt');
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('dashboard').classList.add('hidden');
+}
+
+function showDashboard() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('dashboard').classList.remove('hidden');
+  if (tenantInfo) {
+    document.getElementById('tenant-name').textContent = tenantInfo.name;
+  }
+  loadAll();
+}
+
+// ── Check if already logged in ──
+if (authToken) {
+  // Verify token is still valid
+  authFetch('/api/stats').then(res => {
+    if (res.ok) showDashboard();
+    else doLogout();
+  }).catch(() => doLogout());
+} else {
+  document.getElementById('login-screen').classList.remove('hidden');
+}
+
+// ── Enter key for login form ──
+document.getElementById('login-password').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') doLogin();
+});
+
+// ── Dashboard Logic ──
 const STATE_BADGE = {
   MENU:           'badge-menu',
   SERVICE_SELECT: 'badge-menu',
@@ -274,13 +398,8 @@ function timeAgo(dateStr) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function statusBadge(status) {
-  const cls = { PENDING: 'badge-pending', CONFIRMED: 'badge-confirmed', DONE: 'badge-done' }[status] || '';
-  return `<span class="badge ${cls}">${status}</span>`;
-}
-
 async function loadStats() {
-  const data = await fetch('/api/stats').then(r => r.json());
+  const data = await authFetch('/api/stats').then(r => r.json());
   document.getElementById('stat-total').textContent     = data.totalJobs;
   document.getElementById('stat-pending').textContent   = data.pendingJobs;
   document.getElementById('stat-confirmed').textContent = data.confirmedJobs;
@@ -290,7 +409,7 @@ async function loadStats() {
 }
 
 async function loadJobs() {
-  const jobs = await fetch('/api/jobs').then(r => r.json());
+  const jobs = await authFetch('/api/jobs').then(r => r.json());
   const tbody = document.getElementById('jobs-tbody');
   document.getElementById('jobs-count').textContent = jobs.length;
 
@@ -330,7 +449,7 @@ async function loadJobs() {
 }
 
 async function loadConversations() {
-  const convs = await fetch('/api/conversations').then(r => r.json());
+  const convs = await authFetch('/api/conversations').then(r => r.json());
   const active = convs.filter(c => c.state !== 'DONE');
   document.getElementById('convs-count').textContent = active.length;
   const list = document.getElementById('convs-list');
@@ -350,7 +469,7 @@ async function loadConversations() {
 }
 
 async function updateStatus(id, status) {
-  await fetch(`/api/jobs/${id}/status`, {
+  await authFetch(`/api/jobs/${id}/status`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status }),
@@ -363,7 +482,7 @@ async function sendDigest() {
   btn.disabled = true;
   btn.textContent = 'Sending…';
   try {
-    await fetch('/api/test-digest');
+    await authFetch('/api/test-digest');
     btn.textContent = '✅ Sent!';
     setTimeout(() => { btn.disabled = false; btn.textContent = '📤 Send Digest Now'; }, 3000);
   } catch {
@@ -373,10 +492,12 @@ async function sendDigest() {
 }
 
 async function loadAll() {
-  await Promise.all([loadStats(), loadJobs(), loadConversations()]);
-  document.getElementById('last-updated').textContent =
-    'Updated ' + new Date().toLocaleTimeString();
-  startProgressBar();
+  try {
+    await Promise.all([loadStats(), loadJobs(), loadConversations()]);
+    document.getElementById('last-updated').textContent =
+      'Updated ' + new Date().toLocaleTimeString();
+    startProgressBar();
+  } catch { /* logged out */ }
 }
 
 function startProgressBar() {
@@ -389,9 +510,12 @@ function startProgressBar() {
   });
 }
 
-// Initial load + auto-refresh every 30s
-loadAll();
-setInterval(loadAll, 30000);
+// Auto-refresh every 30s (only when dashboard is visible)
+setInterval(() => {
+  if (authToken && !document.getElementById('dashboard').classList.contains('hidden')) {
+    loadAll();
+  }
+}, 30000);
 </script>
 </body>
 </html>

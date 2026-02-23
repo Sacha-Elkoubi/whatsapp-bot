@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { config } from '../config.js';
+import type { TenantConfig } from './tenant.js';
 
 // Slot duration in minutes per service type
 const SLOT_DURATION_MINUTES: Record<string, number> = {
@@ -9,17 +9,56 @@ const SLOT_DURATION_MINUTES: Record<string, number> = {
   Handyman: 60,
 };
 
+// Shorter slots for urgent requests — easier to fit into calendar gaps
+const URGENT_SLOT_DURATION_MINUTES: Record<string, number> = {
+  Plumber: 60,
+  Electrician: 60,
+  Locksmith: 30,
+  Handyman: 30,
+};
+
 const DEFAULT_DURATION = 120;
+const DEFAULT_URGENT_DURATION = 60;
 
-// Business hours: Mon–Fri, 08:00–18:00
-const BUSINESS_START_HOUR = 8;
-const BUSINESS_END_HOUR = 18;
+// Default business hours
+const DEFAULT_START_HOUR = 8;
+const DEFAULT_END_HOUR = 18;
+const DEFAULT_DAYS = [1, 2, 3, 4, 5]; // Mon–Fri
 
-function getCalendarClient() {
+interface BusinessHours {
+  start: number;
+  end: number;
+  days: number[];
+}
+
+function getBusinessHours(tenant: TenantConfig): BusinessHours {
+  if (tenant.businessHours) {
+    try {
+      const parsed = JSON.parse(tenant.businessHours) as BusinessHours;
+      return {
+        start: parsed.start ?? DEFAULT_START_HOUR,
+        end: parsed.end ?? DEFAULT_END_HOUR,
+        days: parsed.days ?? DEFAULT_DAYS,
+      };
+    } catch {
+      // fall through to default
+    }
+  }
+  return { start: DEFAULT_START_HOUR, end: DEFAULT_END_HOUR, days: DEFAULT_DAYS };
+}
+
+function getSlotDuration(serviceType: string, urgent: boolean): number {
+  if (urgent) {
+    return URGENT_SLOT_DURATION_MINUTES[serviceType] ?? DEFAULT_URGENT_DURATION;
+  }
+  return SLOT_DURATION_MINUTES[serviceType] ?? DEFAULT_DURATION;
+}
+
+function getCalendarClient(tenant: TenantConfig) {
   const auth = new google.auth.GoogleAuth({
     credentials: {
-      client_email: config.google.serviceAccountEmail,
-      private_key: config.google.privateKey,
+      client_email: tenant.googleServiceAccountEmail,
+      private_key: tenant.googlePrivateKey.replace(/\\n/g, '\n'),
     },
     scopes: ['https://www.googleapis.com/auth/calendar'],
   });
@@ -29,7 +68,6 @@ function getCalendarClient() {
 /** Round up to next slot boundary (on the hour or half-hour) */
 function roundUpToSlot(date: Date, durationMin: number): Date {
   const d = new Date(date);
-  // Round up to nearest `durationMin` boundary within the hour
   const step = durationMin >= 60 ? 60 : 30;
   const minutes = d.getMinutes();
   const remainder = minutes % step;
@@ -42,63 +80,73 @@ function roundUpToSlot(date: Date, durationMin: number): Date {
 }
 
 /** Get the start of the next valid business window */
-function nextBusinessStart(from: Date): Date {
+function nextBusinessStart(from: Date, hours: BusinessHours): Date {
   const d = new Date(from);
-  const day = d.getDay(); // 0=Sun, 6=Sat
+  const day = d.getDay();
 
-  // If weekend, move to Monday
-  if (day === 0) d.setDate(d.getDate() + 1);
-  if (day === 6) d.setDate(d.getDate() + 2);
-
-  // If after business hours, move to next business day 8am
-  if (d.getHours() >= BUSINESS_END_HOUR) {
-    d.setDate(d.getDate() + 1);
-    d.setHours(BUSINESS_START_HOUR, 0, 0, 0);
-    return nextBusinessStart(d); // recurse in case we landed on weekend
+  // If not a business day, advance to the next one
+  if (!hours.days.includes(day)) {
+    for (let i = 1; i <= 7; i++) {
+      const nextDay = (day + i) % 7;
+      if (hours.days.includes(nextDay)) {
+        d.setDate(d.getDate() + i);
+        d.setHours(hours.start, 0, 0, 0);
+        return d;
+      }
+    }
   }
 
-  // If before business hours, set to 8am today
-  if (d.getHours() < BUSINESS_START_HOUR) {
-    d.setHours(BUSINESS_START_HOUR, 0, 0, 0);
+  // If after business hours, move to next business day
+  if (d.getHours() >= hours.end) {
+    d.setDate(d.getDate() + 1);
+    d.setHours(hours.start, 0, 0, 0);
+    return nextBusinessStart(d, hours);
+  }
+
+  // If before business hours, set to start
+  if (d.getHours() < hours.start) {
+    d.setHours(hours.start, 0, 0, 0);
   }
 
   return d;
 }
 
-function isBusinessHour(date: Date): boolean {
-  const day = date.getDay();
-  if (day === 0 || day === 6) return false; // weekend
+function isBusinessHour(date: Date, hours: BusinessHours): boolean {
+  if (!hours.days.includes(date.getDay())) return false;
   const hour = date.getHours();
-  return hour >= BUSINESS_START_HOUR && hour < BUSINESS_END_HOUR;
+  return hour >= hours.start && hour < hours.end;
 }
 
 /**
  * Returns up to 3 available start times from Google Calendar.
- * Searches within the next 5 business days.
+ * For urgent requests, uses shorter slot durations, a smaller buffer,
+ * and a tighter search window to prioritise the soonest availability.
  */
-export async function getAvailableSlots(serviceType: string): Promise<Date[]> {
-  const durationMin = SLOT_DURATION_MINUTES[serviceType] ?? DEFAULT_DURATION;
-  const calendar = getCalendarClient();
+export async function getAvailableSlots(tenant: TenantConfig, serviceType: string, urgent = false): Promise<Date[]> {
+  const durationMin = getSlotDuration(serviceType, urgent);
+  const calendar = getCalendarClient(tenant);
+  const hours = getBusinessHours(tenant);
 
   const now = new Date();
-  // Add 30-min buffer so we don't offer slots starting in the next few minutes
-  now.setMinutes(now.getMinutes() + 30);
+  // Shorter buffer for urgent requests (15 min vs 30 min)
+  now.setMinutes(now.getMinutes() + (urgent ? 15 : 30));
 
-  const searchStart = nextBusinessStart(now);
+  const searchStart = nextBusinessStart(now, hours);
   const searchEnd = new Date(searchStart);
-  searchEnd.setDate(searchEnd.getDate() + 7); // look up to 7 calendar days ahead
+  // Urgent: search 3 days ahead; normal: 7 days
+  searchEnd.setDate(searchEnd.getDate() + (urgent ? 3 : 7));
 
   // Get busy blocks from Google Calendar
   const freebusyRes = await calendar.freebusy.query({
     requestBody: {
       timeMin: searchStart.toISOString(),
       timeMax: searchEnd.toISOString(),
-      items: [{ id: config.google.calendarId }],
+      items: [{ id: tenant.googleCalendarId }],
     },
   });
 
   const busyBlocks =
-    freebusyRes.data.calendars?.[config.google.calendarId]?.busy ?? [];
+    freebusyRes.data.calendars?.[tenant.googleCalendarId]?.busy ?? [];
 
   const busy = busyBlocks.map((b) => ({
     start: new Date(b.start ?? ''),
@@ -114,9 +162,9 @@ export async function getAvailableSlots(serviceType: string): Promise<Date[]> {
 
     // Slot must fit within business hours
     if (
-      isBusinessHour(cursor) &&
-      slotEnd.getHours() <= BUSINESS_END_HOUR &&
-      !(slotEnd.getHours() === BUSINESS_END_HOUR && slotEnd.getMinutes() > 0)
+      isBusinessHour(cursor, hours) &&
+      slotEnd.getHours() <= hours.end &&
+      !(slotEnd.getHours() === hours.end && slotEnd.getMinutes() > 0)
     ) {
       // Check not overlapping any busy block
       const overlaps = busy.some(
@@ -132,10 +180,10 @@ export async function getAvailableSlots(serviceType: string): Promise<Date[]> {
     cursor = new Date(cursor.getTime() + durationMin * 60 * 1000);
 
     // If we've gone past business end, jump to next business day
-    if (cursor.getHours() >= BUSINESS_END_HOUR) {
+    if (cursor.getHours() >= hours.end) {
       cursor.setDate(cursor.getDate() + 1);
-      cursor.setHours(BUSINESS_START_HOUR, 0, 0, 0);
-      cursor = nextBusinessStart(cursor);
+      cursor.setHours(hours.start, 0, 0, 0);
+      cursor = nextBusinessStart(cursor, hours);
     }
   }
 
@@ -150,21 +198,23 @@ export interface CalendarEvent {
 /**
  * Creates a Google Calendar event for the job appointment.
  */
-export async function createCalendarEvent(opts: {
+export async function createCalendarEvent(tenant: TenantConfig, opts: {
   serviceType: string;
   description: string;
   address: string;
   customerPhone: string;
   startTime: Date;
+  urgent?: boolean;
 }): Promise<CalendarEvent> {
-  const durationMin = SLOT_DURATION_MINUTES[opts.serviceType] ?? DEFAULT_DURATION;
+  const durationMin = getSlotDuration(opts.serviceType, opts.urgent ?? false);
   const endTime = new Date(opts.startTime.getTime() + durationMin * 60 * 1000);
-  const calendar = getCalendarClient();
+  const calendar = getCalendarClient(tenant);
 
+  const urgentPrefix = opts.urgent ? '[URGENT] ' : '';
   const event = await calendar.events.insert({
-    calendarId: config.google.calendarId,
+    calendarId: tenant.googleCalendarId,
     requestBody: {
-      summary: `${opts.serviceType} — ${opts.customerPhone}`,
+      summary: `${urgentPrefix}${opts.serviceType} — ${opts.customerPhone}`,
       description: `Problem: ${opts.description}\nCustomer: ${opts.customerPhone}`,
       location: opts.address,
       start: { dateTime: opts.startTime.toISOString() },
@@ -188,10 +238,10 @@ export async function createCalendarEvent(opts: {
 /**
  * Deletes a Google Calendar event (e.g. if customer cancels).
  */
-export async function deleteCalendarEvent(eventId: string): Promise<void> {
-  const calendar = getCalendarClient();
+export async function deleteCalendarEvent(tenant: TenantConfig, eventId: string): Promise<void> {
+  const calendar = getCalendarClient(tenant);
   await calendar.events.delete({
-    calendarId: config.google.calendarId,
+    calendarId: tenant.googleCalendarId,
     eventId,
   });
 }

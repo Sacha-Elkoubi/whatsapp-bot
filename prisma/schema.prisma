@@ -1,4 +1,4 @@
-// WhatsApp bot schema for service-based businesses
+// WhatsApp bot schema for multi-tenant service businesses
 
 generator client {
   provider = "prisma-client-js"
@@ -9,43 +9,79 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Customer {
-  id            String         @id @default(cuid())
-  phone         String         @unique
-  name          String?
-  createdAt     DateTime       @default(now())
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  email     String   @unique
+  passwordHash String
+
+  // WhatsApp Cloud API credentials
+  whatsappToken           String
+  whatsappPhoneNumberId   String   @unique
+  whatsappVerifyToken     String
+
+  // Google Calendar credentials
+  googleServiceAccountEmail String
+  googlePrivateKey          String
+  googleCalendarId          String
+
+  // Business config
+  ownerPhone    String
+  businessHours String?  // JSON: { start: 8, end: 18, days: [1,2,3,4,5] }
+  services      String?  // JSON: [{ id, title, description }] — null = use defaults
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customers     Customer[]
   conversations Conversation[]
   jobs          Job[]
 }
 
+model Customer {
+  id            String         @id @default(cuid())
+  tenantId      String
+  phone         String
+  name          String?
+  createdAt     DateTime       @default(now())
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  conversations Conversation[]
+  jobs          Job[]
+
+  @@unique([tenantId, phone])
+}
+
 model Conversation {
   id         String   @id @default(cuid())
+  tenantId   String
   customerId String
-  // State machine: MENU | SERVICE_SELECT | INTAKE | CONFIRM | SLOT_SELECT | AI_CHAT | HANDOFF | DONE
   state      String   @default("MENU")
-  // Collects structured intake data (service type, problem, address, urgency) - JSON string
   intakeData String   @default("{}")
-  // Claude message history [{ role, content }] - JSON string
   aiHistory  String   @default("[]")
   handedOff  Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
   customer   Customer @relation(fields: [customerId], references: [id])
 }
 
 model Job {
-  id          String   @id @default(cuid())
-  customerId  String
-  serviceType String
-  description String
-  address     String
-  urgent      Boolean  @default(false)
-  status      String   @default("PENDING") // PENDING | CONFIRMED | DONE
+  id              String    @id @default(cuid())
+  tenantId        String
+  customerId      String
+  serviceType     String
+  description     String
+  address         String
+  urgent          Boolean   @default(false)
+  status          String    @default("PENDING")
   quoteMin        Float?
   quoteMax        Float?
-  scheduledAt     DateTime? // Confirmed appointment start time
-  calendarEventId String?   // Google Calendar event ID
-  calendarLink    String?   // Link to view the event in Google Calendar
+  scheduledAt     DateTime?
+  calendarEventId String?
+  calendarLink    String?
   createdAt       DateTime  @default(now())
+  tenant          Tenant    @relation(fields: [tenantId], references: [id])
   customer        Customer  @relation(fields: [customerId], references: [id])
 }
