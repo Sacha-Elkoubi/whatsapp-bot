@@ -1,4 +1,5 @@
 import { sendText, sendButtons, sendList } from '../services/whatsapp.js';
+import type { TenantConfig } from '../services/tenant.js';
 
 export const SERVICES = [
   { id: 'svc_plumber', title: 'Plumber', description: 'Leaks, pipes, boilers' },
@@ -7,9 +8,21 @@ export const SERVICES = [
   { id: 'svc_handyman', title: 'Handyman', description: 'General repairs & fixes' },
 ];
 
-export async function sendWelcomeMenu(to: string): Promise<void> {
-  // Using list (not buttons) to support 4 options — WhatsApp buttons max out at 3
+export function getServices(tenant: TenantConfig) {
+  if (tenant.services) {
+    try {
+      const parsed = JSON.parse(tenant.services) as typeof SERVICES;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch {
+      // fall through to default
+    }
+  }
+  return SERVICES;
+}
+
+export async function sendWelcomeMenu(tenant: TenantConfig, to: string): Promise<void> {
   await sendList(
+    tenant,
     to,
     `👋 Welcome! I'm your service booking assistant.\n\nHow can I help you today?`,
     'Choose an option',
@@ -22,8 +35,9 @@ export async function sendWelcomeMenu(to: string): Promise<void> {
   );
 }
 
-export async function sendFAQMenu(to: string): Promise<void> {
+export async function sendFAQMenu(tenant: TenantConfig, to: string): Promise<void> {
   await sendList(
+    tenant,
     to,
     '❓ *Frequently Asked Questions*\n\nSelect a topic or just type your question:',
     'Browse FAQs',
@@ -38,16 +52,18 @@ export async function sendFAQMenu(to: string): Promise<void> {
   );
 }
 
-export async function sendServiceMenu(to: string): Promise<void> {
+export async function sendServiceMenu(tenant: TenantConfig, to: string): Promise<void> {
   await sendList(
+    tenant,
     to,
     'Which service do you need?\n\nSelect from the list below 👇',
     'Choose a service',
-    SERVICES
+    getServices(tenant)
   );
 }
 
 export async function sendIntakeQuestion(
+  tenant: TenantConfig,
   to: string,
   step: number,
   serviceType: string
@@ -59,12 +75,12 @@ export async function sendIntakeQuestion(
   };
 
   if (step === 2) {
-    await sendButtons(to, questions[2] ?? '', [
+    await sendButtons(tenant, to, questions[2] ?? '', [
       { id: 'intake_urgent_yes', title: '🚨 Yes, urgent' },
       { id: 'intake_urgent_no', title: '📅 No, can wait' },
     ]);
   } else {
-    await sendText(to, questions[step] ?? '');
+    await sendText(tenant, to, questions[step] ?? '');
   }
 }
 
@@ -94,9 +110,10 @@ export function formatSlotLabel(date: Date): string {
 }
 
 /** Send a list of available appointment slots for the customer to pick */
-export async function sendSlotPicker(to: string, slots: Date[]): Promise<void> {
+export async function sendSlotPicker(tenant: TenantConfig, to: string, slots: Date[]): Promise<void> {
   if (slots.length === 0) {
     await sendText(
+      tenant,
       to,
       `⚠️ No available slots found in the next few days. Our team will contact you shortly to arrange a time.`
     );
@@ -104,6 +121,7 @@ export async function sendSlotPicker(to: string, slots: Date[]): Promise<void> {
   }
 
   await sendList(
+    tenant,
     to,
     `📅 *Choose your appointment slot*\n\nHere are the next available times for your booking:`,
     'Pick a slot',
@@ -116,12 +134,14 @@ export async function sendSlotPicker(to: string, slots: Date[]): Promise<void> {
 }
 
 export async function sendJobConfirmation(
+  tenant: TenantConfig,
   to: string,
   details: { service: string; description: string; address: string; urgent: boolean; quoteMin: number; quoteMax: number }
 ): Promise<void> {
   const urgencyLabel = details.urgent ? '🚨 Urgent (within 2 hours)' : '📅 Scheduled';
 
   await sendButtons(
+    tenant,
     to,
     `✅ *Here's your job summary:*\n\n` +
     `🔧 Service: ${details.service}\n` +

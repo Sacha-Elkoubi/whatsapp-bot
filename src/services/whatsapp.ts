@@ -1,24 +1,28 @@
 import axios from 'axios';
-import { config } from '../config.js';
+import type { TenantConfig } from './tenant.js';
 
-const BASE_URL = `https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}/messages`;
+function makeUrl(phoneNumberId: string): string {
+  return `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
+}
 
-const headers = {
-  Authorization: `Bearer ${config.whatsapp.token}`,
-  'Content-Type': 'application/json',
-};
+function makeHeaders(token: string) {
+  return {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+}
 
 /** Send a plain text message */
-export async function sendText(to: string, body: string): Promise<void> {
+export async function sendText(tenant: TenantConfig, to: string, body: string): Promise<void> {
   await axios.post(
-    BASE_URL,
+    makeUrl(tenant.whatsappPhoneNumberId),
     {
       messaging_product: 'whatsapp',
       to,
       type: 'text',
       text: { body },
     },
-    { headers }
+    { headers: makeHeaders(tenant.whatsappToken) }
   );
 }
 
@@ -29,12 +33,13 @@ export interface ButtonOption {
 
 /** Send an interactive button message (max 3 buttons) */
 export async function sendButtons(
+  tenant: TenantConfig,
   to: string,
   bodyText: string,
   buttons: ButtonOption[]
 ): Promise<void> {
   await axios.post(
-    BASE_URL,
+    makeUrl(tenant.whatsappPhoneNumberId),
     {
       messaging_product: 'whatsapp',
       to,
@@ -50,7 +55,7 @@ export async function sendButtons(
         },
       },
     },
-    { headers }
+    { headers: makeHeaders(tenant.whatsappToken) }
   );
 }
 
@@ -62,13 +67,14 @@ export interface ListRow {
 
 /** Send an interactive list message (for menus with more than 3 options) */
 export async function sendList(
+  tenant: TenantConfig,
   to: string,
   bodyText: string,
   buttonLabel: string,
   rows: ListRow[]
 ): Promise<void> {
   await axios.post(
-    BASE_URL,
+    makeUrl(tenant.whatsappPhoneNumberId),
     {
       messaging_product: 'whatsapp',
       to,
@@ -82,19 +88,19 @@ export async function sendList(
         },
       },
     },
-    { headers }
+    { headers: makeHeaders(tenant.whatsappToken) }
   );
 }
 
 /** Mark a message as read */
-export async function markRead(messageId: string): Promise<void> {
+export async function markRead(tenant: TenantConfig, messageId: string): Promise<void> {
   await axios.post(
-    BASE_URL,
+    makeUrl(tenant.whatsappPhoneNumberId),
     {
       messaging_product: 'whatsapp',
       status: 'read',
       message_id: messageId,
     },
-    { headers }
+    { headers: makeHeaders(tenant.whatsappToken) }
   );
 }

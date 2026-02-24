@@ -1,8 +1,9 @@
 import { prisma } from '../db/client.js';
 import { sendText } from '../services/whatsapp.js';
-import { config } from '../config.js';
+import type { TenantConfig } from '../services/tenant.js';
 
 export async function initiateHandoff(
+  tenant: TenantConfig,
   conversationId: string,
   customerPhone: string,
   reason?: string
@@ -15,20 +16,18 @@ export async function initiateHandoff(
 
   // Notify the customer
   await sendText(
+    tenant,
     customerPhone,
     `I'm connecting you with a member of our team now. 👤\n\nThey'll reply to you shortly. Thank you for your patience!`
   );
 
   // Notify the business owner via WhatsApp
-  const customer = await prisma.customer.findUnique({
-    where: { phone: customerPhone },
-  });
-
-  const customerName = customer?.name ?? customerPhone;
+  const customerName = customerPhone;
   const reasonText = reason ? `\nReason: ${reason}` : '';
 
   await sendText(
-    config.ownerPhone,
+    tenant,
+    tenant.ownerPhone,
     `🔔 *Handoff Alert*\n\nA customer needs your attention.\n\nCustomer: ${customerName}\nPhone: ${customerPhone}${reasonText}\n\nReply directly to this number on WhatsApp to respond.`
   );
 }

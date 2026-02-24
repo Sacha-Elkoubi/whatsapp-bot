@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { config } from './config.js';
 import { registerWebhooks } from './webhooks/meta.js';
+import { registerAuthRoutes } from './api/auth.js';
 import { registerDashboardRoutes } from './api/dashboard.js';
 import { initCron } from './services/cron.js';
 
@@ -13,9 +14,10 @@ app.register(fastifyStatic, {
   root: path.join(__dirname, 'static'),
 });
 
-// Routes
-registerWebhooks(app);
-registerDashboardRoutes(app);
+// Routes (order matters: auth before dashboard so middleware is registered)
+registerAuthRoutes(app);       // /api/auth/login, /api/auth/register (no auth required)
+registerWebhooks(app);         // /webhook (no auth — Meta sends webhooks here)
+registerDashboardRoutes(app);  // /api/* (JWT auth required)
 
 app.get('/health', async () => ({ status: 'ok' }));
 

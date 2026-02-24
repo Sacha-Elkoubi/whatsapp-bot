@@ -1,13 +1,10 @@
 import { prisma } from '../db/client.js';
 import { sendText } from './whatsapp.js';
-import { config } from '../config.js';
+import { getAllActiveTenants, type TenantConfig } from './tenant.js';
 
-async function generateDigestMessage(): Promise<string> {
+async function generateDigestMessage(tenantId: string): Promise<string> {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-
-  const yesterdayStart = new Date(todayStart);
-  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
 
   const [
     newJobsToday,
@@ -17,12 +14,12 @@ async function generateDigestMessage(): Promise<string> {
     openHandoffs,
     urgentPending,
   ] = await Promise.all([
-    prisma.job.count({ where: { createdAt: { gte: todayStart } } }),
-    prisma.job.count({ where: { status: 'PENDING' } }),
-    prisma.job.count({ where: { status: 'CONFIRMED' } }),
-    prisma.conversation.count({ where: { state: { notIn: ['DONE', 'HANDOFF'] } } }),
-    prisma.conversation.count({ where: { handedOff: true, state: 'HANDOFF' } }),
-    prisma.job.count({ where: { status: 'PENDING', urgent: true } }),
+    prisma.job.count({ where: { tenantId, createdAt: { gte: todayStart } } }),
+    prisma.job.count({ where: { tenantId, status: 'PENDING' } }),
+    prisma.job.count({ where: { tenantId, status: 'CONFIRMED' } }),
+    prisma.conversation.count({ where: { tenantId, state: { notIn: ['DONE', 'HANDOFF'] } } }),
+    prisma.conversation.count({ where: { tenantId, handedOff: true, state: 'HANDOFF' } }),
+    prisma.job.count({ where: { tenantId, status: 'PENDING', urgent: true } }),
   ]);
 
   const date = new Date().toLocaleDateString('en-GB', {
@@ -58,8 +55,18 @@ async function generateDigestMessage(): Promise<string> {
 }
 
 export async function sendDailyDigest(): Promise<void> {
-  console.log('[digest] Sending daily digest...');
-  const message = await generateDigestMessage();
-  await sendText(config.ownerPhone, message);
-  console.log('[digest] Daily digest sent.');
+  console.log('[digest] Sending daily digest to all tenants...');
+  const tenants = await getAllActiveTenants();
+
+  for (const tenant of tenants) {
+    try {
+      const message = await generateDigestMessage(tenant.id);
+      await sendText(tenant, tenant.ownerPhone, message);
+      console.log(`[digest] Digest sent to tenant: ${tenant.slug}`);
+    } catch (err) {
+      console.error(`[digest] Failed for tenant ${tenant.slug}:`, err);
+    }
+  }
+
+  console.log('[digest] All digests sent.');
 }
